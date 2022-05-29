@@ -1,18 +1,18 @@
+from environment import ContinuousMountainCarEnv
 from machin.frame.algorithms import TD3
 from machin.utils.logging import default_logger as logger
 import torch as t
 import torch.nn as nn
-import numpy as np
-from environment import Continuous_MountainCarEnv
+import time
 
 # configurations
-env = Continuous_MountainCarEnv()
+env = ContinuousMountainCarEnv()
 observe_dim = 2
 action_dim = 1
 action_range = 1
-max_episodes = 1000
-max_steps = 200
-solved_reward = -150
+max_episodes = 600
+max_steps = 500
+solved_reward = 80
 solved_repeat = 5
 
 
@@ -49,7 +49,7 @@ class Critic(nn.Module):
         return q
 
 
-if __name__ == "__main__":
+def train_td3():
     actor = Actor(observe_dim, action_dim, action_range)
     actor_t = Actor(observe_dim, action_dim, action_range)
     critic = Critic(observe_dim, action_dim)
@@ -70,23 +70,35 @@ if __name__ == "__main__":
 
     episode, step, reward_fulfilled = 0, 0, 0
     smoothed_total_reward = 0
+    all_rewards = []
 
-    while episode < max_episodes:
+    start_time = time.time()
+
+    for episode in range(max_episodes):
         episode += 1
         total_reward = 0
         terminal = False
         step = 0
+        frame_skip = 0
         state = t.tensor(env.reset(), dtype=t.float32).view(1, observe_dim)
         tmp_observations = []
 
         while not terminal and step <= max_steps:
-            step += 1
             with t.no_grad():
                 old_state = state
 
-                if step%2 == 1:
-                    action = t.tensor([[np.random.uniform(low=-1, high=1)]])
-                # agent model inference
+                if episode < 200:
+                    action = 2*t.rand(size=(1,1)) - 1
+                    if step == 0:
+                        previous_action = action
+                    # frame skipping -> use the same action for 30 consecutive steps
+                    if frame_skip < 30:
+                        action = previous_action
+                        frame_skip += 1
+                    else:
+                        previous_action = action
+                        frame_skip = 0
+
                 else:
                     action = td3.act({"state": old_state})
                 # print(action)
@@ -103,10 +115,11 @@ if __name__ == "__main__":
                         "terminal": terminal or step == max_steps,
                     }
                 )
+            step += 1
 
         td3.store_episode(tmp_observations)
-        # update, update more if episode is longer, else less
-        if episode > 100:
+        # update, update more if episode is longer (slow solution), else less
+        if episode >= 150:
             for _ in range(step):
                 td3.update()
 
@@ -114,10 +127,20 @@ if __name__ == "__main__":
         smoothed_total_reward = smoothed_total_reward * 0.9 + total_reward * 0.1
         logger.info(f"Episode {episode} total reward={smoothed_total_reward:.2f}")
 
-        # if smoothed_total_reward > solved_reward:
-        #     reward_fulfilled += 1
-        #     if reward_fulfilled >= solved_repeat:
-        #         logger.info("Environment solved!")
-        #         exit(0)
-        # else:
-        #     reward_fulfilled = 0
+        all_rewards.append(total_reward)
+
+        # episode >= 200 means not solved by random policy
+        if episode >= 200 and smoothed_total_reward > solved_reward:
+            reward_fulfilled += 1
+            if reward_fulfilled >= solved_repeat:
+                break
+        else:
+            reward_fulfilled = 0
+
+    if reward_fulfilled >= solved_repeat:
+        logger.info("Environment solved!")
+
+    end_time = time.time()
+    logger.info(f"Time needed: {end_time - start_time:.2f} seconds")
+
+    return all_rewards, end_time - start_time, reward_fulfilled >= solved_repeat

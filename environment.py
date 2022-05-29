@@ -3,7 +3,7 @@ import numpy as np
 from gym import spaces
 
 
-class Continuous_MountainCarEnv():
+class ContinuousMountainCarEnv():
 
     def __init__(self):
         self.min_action = -1.0
@@ -47,12 +47,13 @@ class Continuous_MountainCarEnv():
         if position == self.min_position and velocity < 0:
             velocity = 0
 
-        # Convert a possible numpy bool to a Python bool.
-        done = bool(position >= self.goal_position and velocity >= self.goal_velocity)
+        done = bool(position >= self.goal_position)
 
         reward = 0
         if done:
             reward = 100.0
+            # print('YES')
+            # exit()
         reward -= math.pow(action[0], 2) * 0.1
 
         self.state = np.array([position, velocity], dtype=np.float32)
