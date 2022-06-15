@@ -52,8 +52,6 @@ class ContinuousMountainCarEnv():
         reward = 0
         if done:
             reward = 100.0
-            # print('YES')
-            # exit()
         reward -= math.pow(action[0], 2) * 0.1
 
         self.state = np.array([position, velocity], dtype=np.float32)
