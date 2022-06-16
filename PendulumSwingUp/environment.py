@@ -1,16 +1,16 @@
-from typing import Optional
 import numpy as np
 from gym import spaces
 import numpy as np
 import RobotDART as rd
 import dartpy # OSX breaks if this is imported before RobotDART
+from utlis import angle_wrap
 
 
 class PendulumEnv():
 
     def __init__(self, enable_graphics = True):
 
-        self.dt = 0.001
+        self.dt = 0.01
         self.simu = rd.RobotDARTSimu(self.dt)
 
         self.robot = rd.Robot("pendulum.urdf")
@@ -40,6 +40,7 @@ class PendulumEnv():
 
 
     def step(self, cmd):
+        done = False
         cmd = np.clip(cmd, -self.max_torque, self.max_torque)[0]
 
         self.robot.set_commands(cmd)
@@ -47,20 +48,26 @@ class PendulumEnv():
         if self.simu.step_world():
             return
 
-        theta = self.robot.positions()[0]
+        theta = angle_wrap(self.robot.positions()[0])
         torque = self.robot.forces()[0]
 
         obs = np.array([np.cos(theta), np.sin(theta), torque], dtype=np.float32)
+        cost = (theta**2 + 0.1*torque**2 + 0.001*cmd[0]**2)/(np.pi**2 + 0.1*self.max_torque**2 + 0.001*self.max_torque**2)
 
-        cost = theta**2
+        if np.abs(theta) < 0.3 and np.abs(torque) < 0.5:
+            cost = 0
+            done = True
 
-        return obs, -cost, False
+        return obs, -cost, done
 
 
     def reset(self):
         self.robot.reset()
         self.robot.set_positions(self.init_pos)
-        
+
+        if self.simu.step_world():
+            return
+
         theta = self.robot.positions()[0]
         torque = self.robot.forces()[0]
 

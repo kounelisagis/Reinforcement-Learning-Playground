@@ -1,20 +1,20 @@
-from environment import PendulumEnv
 from machin.frame.algorithms import TD3
 from machin.utils.logging import default_logger as logger
 import torch as t
 import torch.nn as nn
+from environment import PendulumEnv
 import time
 
 # configurations
-env = PendulumEnv(enable_graphics = False)
-state_dim = 3
+env = PendulumEnv(enable_graphics=False)
 observe_dim = 3
 action_dim = 1
 action_range = 2.5
-max_episodes = 300
-max_steps = 5000
-solved_reward = -150
-solved_repeat = 5
+max_episodes = 500
+max_steps = 500
+noise_param = (0, 0.1)
+noise_mode = "normal"
+solved_repeat = 3
 
 
 # model definition
@@ -50,97 +50,100 @@ class Critic(nn.Module):
         return q
 
 
-actor = Actor(observe_dim, action_dim, action_range)
-actor_t = Actor(observe_dim, action_dim, action_range)
-critic = Critic(observe_dim, action_dim)
-critic_t = Critic(observe_dim, action_dim)
-critic2 = Critic(observe_dim, action_dim)
-critic2_t = Critic(observe_dim, action_dim)
+def train_td3():
+    actor = Actor(observe_dim, action_dim, action_range)
+    actor_t = Actor(observe_dim, action_dim, action_range)
+    critic = Critic(observe_dim, action_dim)
+    critic_t = Critic(observe_dim, action_dim)
+    critic2 = Critic(observe_dim, action_dim)
+    critic2_t = Critic(observe_dim, action_dim)
 
-td3 = TD3(
-    actor,
-    actor_t,
-    critic,
-    critic_t,
-    critic2,
-    critic2_t,
-    t.optim.Adam,
-    nn.MSELoss(reduction="sum"),
-)
 
-episode, step, reward_fulfilled = 0, 0, 0
-smoothed_total_reward = 0
-all_rewards = []
+    td3 = TD3(
+        actor,
+        actor_t,
+        critic,
+        critic_t,
+        critic2,
+        critic2_t,
+        t.optim.Adam,
+        nn.MSELoss(reduction="sum"),
+        batch_size = 32,
+        update_rate = 0.001, 
+        actor_learning_rate = 0.0005,
+        critic_learning_rate = 0.001,
+    )
 
-start_time = time.time()
+    episode, step, reward_fulfilled = 0, 0, 0
+    smoothed_total_reward = 0
+    all_rewards = []
 
-for episode in range(max_episodes):
-    episode += 1
-    total_reward = 0
-    terminal = False
-    step = 0
-    frame_skip = 0
-    state = t.tensor(env.reset(), dtype=t.float32).view(1, observe_dim)
-    tmp_observations = []
+    start_time = time.time()
 
-    while not terminal and step <= max_steps:
-        with t.no_grad():
-            old_state = state
+    for episode in range(max_episodes):
+        total_reward = 0
+        terminal = False
+        step = 0
+        state = t.tensor(env.reset(), dtype=t.float32).view(1, observe_dim)
+        tmp_observations = []
+        frame_skip = 0
 
-            if episode < 50:
-                action = (2.0*t.rand(1, 1) - 1.0) * action_range
+        while not terminal and step <= max_steps:
+            with t.no_grad():
+                old_state = state
 
-                if step == 0:
+                if frame_skip == 0:
+                    if episode < 125:
+                        action = (2.0*t.rand(1, 1) - 1.0) * action_range
+                    else:
+                        action = td3.act_with_noise(
+                            {"state": old_state}, noise_param=noise_param, mode=noise_mode
+                        )
                     previous_action = action
-                # frame skipping -> use the same action for 800 consecutive steps
-                if frame_skip < 800:
+                    frame_skip += 1
+                elif frame_skip < 45:
                     action = previous_action
                     frame_skip += 1
                 else:
-                    previous_action = action
+                    action = previous_action
                     frame_skip = 0
 
-            else:
-                action = td3.act({"state": old_state})
+                state, reward, terminal = env.step(action.numpy())
+                state = t.tensor(state, dtype=t.float32).view(1, observe_dim)
+                total_reward += reward
 
-            state, reward, terminal = env.step(action.numpy())
-            state = t.tensor(state, dtype=t.float32).view(1, observe_dim)
-            total_reward += reward
+                tmp_observations.append(
+                    {
+                        "state": {"state": old_state},
+                        "action": {"action": action},
+                        "next_state": {"state": state},
+                        "reward": reward,
+                        "terminal": terminal or step == max_steps,
+                    }
+                )
+            step += 1
 
-            tmp_observations.append(
-                {
-                    "state": {"state": old_state},
-                    "action": {"action": action},
-                    "next_state": {"state": state},
-                    "reward": reward,
-                    "terminal": terminal or step == max_steps,
-                }
-            )
-        step += 1
+        td3.store_episode(tmp_observations)
+        # update, update more if episode is longer, else less
+        if episode > 100:
+            for _ in range(step):
+                td3.update()
 
-    td3.store_episode(tmp_observations)
-    # update, update more if episode is longer (slow solution), else less
-    if episode >= 30:
-        for _ in range(step):
-            td3.update()
+        # show reward
+        smoothed_total_reward = smoothed_total_reward * 0.9 + total_reward * 0.1
+        logger.info(f"Episode {episode} total reward={smoothed_total_reward:.2f} terminal={terminal}")
 
-    # show reward
-    smoothed_total_reward = smoothed_total_reward * 0.9 + total_reward * 0.1
-    logger.info(f"Episode {episode} total reward={smoothed_total_reward:.2f}")
+        all_rewards.append(total_reward)
 
-    all_rewards.append(total_reward)
+        if episode >= 125 and terminal:
+            reward_fulfilled += 1
+            if reward_fulfilled >= solved_repeat:
+                logger.info("Environment solved!")
+                exit(0)
+        else:
+            reward_fulfilled = 0
 
-    # episode >= 50 means not solved by random policy
-    if episode >= 50 and smoothed_total_reward > solved_reward:
-        reward_fulfilled += 1
-        if reward_fulfilled >= solved_repeat:
-            break
-    else:
-        reward_fulfilled = 0
+    end_time = time.time()
+    logger.info(f"Time needed: {end_time - start_time:.2f} seconds")
 
-if reward_fulfilled >= solved_repeat:
-    logger.info("Environment solved!")
-
-end_time = time.time()
-logger.info(f"Time needed: {end_time - start_time:.2f} seconds")
-
+    return all_rewards, end_time - start_time, reward_fulfilled >= solved_repeat
