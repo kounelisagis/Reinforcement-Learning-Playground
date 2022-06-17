@@ -10,10 +10,11 @@ env = PendulumEnv(enable_graphics=False)
 observe_dim = 3
 action_dim = 1
 action_range = 2.5
-max_episodes = 500
+max_episodes = 1000
 max_steps = 500
-noise_param = (0, 0.1)
+noise_param = (0, 0.05)
 noise_mode = "normal"
+solved_reward = -250
 solved_repeat = 3
 
 
@@ -22,8 +23,8 @@ class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, action_range):
         super().__init__()
 
-        self.fc1 = nn.Linear(state_dim, 16)
-        self.fc2 = nn.Linear(16, 16)
+        self.fc1 = nn.Linear(state_dim, 32)
+        self.fc2 = nn.Linear(32, 16)
         self.fc3 = nn.Linear(16, action_dim)
         self.action_range = action_range
 
@@ -38,8 +39,8 @@ class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super().__init__()
 
-        self.fc1 = nn.Linear(state_dim + action_dim, 16)
-        self.fc2 = nn.Linear(16, 16)
+        self.fc1 = nn.Linear(state_dim + action_dim, 32)
+        self.fc2 = nn.Linear(32, 16)
         self.fc3 = nn.Linear(16, 1)
 
     def forward(self, state, action):
@@ -68,10 +69,10 @@ def train_td3():
         critic2_t,
         t.optim.Adam,
         nn.MSELoss(reduction="sum"),
-        batch_size = 32,
-        update_rate = 0.001, 
-        actor_learning_rate = 0.0005,
-        critic_learning_rate = 0.001,
+        batch_size = 200,
+        update_rate = 1e-3,
+        actor_learning_rate = 1e-4,
+        critic_learning_rate = 1e-3,
     )
 
     episode, step, reward_fulfilled = 0, 0, 0
@@ -93,7 +94,7 @@ def train_td3():
                 old_state = state
 
                 if frame_skip == 0:
-                    if episode < 125:
+                    if episode < 50:
                         action = (2.0*t.rand(1, 1) - 1.0) * action_range
                     else:
                         action = td3.act_with_noise(
@@ -125,7 +126,7 @@ def train_td3():
 
         td3.store_episode(tmp_observations)
         # update, update more if episode is longer, else less
-        if episode > 100:
+        if episode > 50:
             for _ in range(step):
                 td3.update()
 
@@ -135,13 +136,15 @@ def train_td3():
 
         all_rewards.append(total_reward)
 
-        if episode >= 125 and terminal:
+        if episode >= 75 and smoothed_total_reward > solved_reward:
             reward_fulfilled += 1
             if reward_fulfilled >= solved_repeat:
-                logger.info("Environment solved!")
-                exit(0)
+                break
         else:
             reward_fulfilled = 0
+
+    if reward_fulfilled >= solved_repeat:
+        logger.info("Environment solved!")
 
     end_time = time.time()
     logger.info(f"Time needed: {end_time - start_time:.2f} seconds")
