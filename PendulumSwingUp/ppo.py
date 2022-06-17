@@ -12,9 +12,9 @@ env = PendulumEnv(enable_graphics=False)
 observe_dim = 3
 action_num = 1
 action_range = 2.5
-max_episodes = 1000
+max_episodes = 500
 max_steps = 500
-solved_reward = -250
+solved_reward = -280
 solved_repeat = 3
 
 
@@ -23,8 +23,8 @@ class Actor(nn.Module):
     def __init__(self, state_dim, action_num):
         super().__init__()
 
-        self.fc1 = nn.Linear(state_dim, 32)
-        self.fc2 = nn.Linear(32, 16)
+        self.fc1 = nn.Linear(state_dim, 16)
+        self.fc2 = nn.Linear(16, 16)
         self.mu_head = nn.Linear(16, action_num)
         self.sigma_head = nn.Linear(16, action_num)
 
@@ -49,8 +49,8 @@ class Critic(nn.Module):
     def __init__(self, state_dim):
         super().__init__()
 
-        self.fc1 = nn.Linear(state_dim, 32)
-        self.fc2 = nn.Linear(32, 16)
+        self.fc1 = nn.Linear(state_dim, 16)
+        self.fc2 = nn.Linear(16, 16)
         self.fc3 = nn.Linear(16, 1)
 
     def forward(self, state):
@@ -70,7 +70,7 @@ def train_ppo():
         t.optim.Adam,
         nn.MSELoss(reduction="sum"),
         gradient_max = 100.,
-        batch_size = 512,
+        batch_size = 256,
         actor_learning_rate = 1e-3,
         critic_learning_rate = 1e-3,
     )
@@ -94,7 +94,7 @@ def train_ppo():
                 old_state = state
 
                 if frame_skip == 0:
-                    if episode < 50:
+                    if episode < 100:
                         action = (2.0*t.rand(1, 1) - 1.0) * action_range
                     else:
                         action = ppo.act({"state": old_state})[0]
@@ -133,7 +133,7 @@ def train_ppo():
 
         all_rewards.append(total_reward)
 
-        if episode >= 75 and smoothed_total_reward > solved_reward:
+        if episode >= 100 and smoothed_total_reward > solved_reward:
             reward_fulfilled += 1
             if reward_fulfilled >= solved_repeat:
                 break
