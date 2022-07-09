@@ -71,7 +71,7 @@ def train_td3():
         nn.MSELoss(reduction="sum"),
     )
 
-    episode, step, reward_fulfilled = 0, 0, 0
+    reward_fulfilled = 0
     smoothed_total_reward = 0
     all_rewards = []
 
@@ -81,7 +81,6 @@ def train_td3():
         total_reward = 0
         terminal = False
         step = 0
-        frame_skip = 0
 
         state = t.tensor(env.reset(), dtype=t.float32).view(1, observe_dim)
         tmp_observations = []
@@ -90,21 +89,12 @@ def train_td3():
             with t.no_grad():
                 old_state = state
 
-                if frame_skip == 0:
-                    if episode < 100:
-                        action = (2.0*t.rand(1, 1) - 1.0) * action_range
-                    else:
-                        action = td3.act_with_noise(
-                            {"state": old_state}, noise_param=noise_param, mode=noise_mode
-                        )
-                    previous_action = action
-                    frame_skip += 1
-                elif frame_skip < 1:
-                    action = previous_action
-                    frame_skip += 1
+                if episode < 50:
+                    action = (2.0*t.rand(1, 7) - 1.0) * action_range
                 else:
-                    action = previous_action
-                    frame_skip = 0
+                    action = td3.act_with_noise(
+                        {"state": old_state}, noise_param=noise_param, mode=noise_mode
+                    )
 
                 state, reward, terminal = env.step(action.numpy())
                 state = t.tensor(state, dtype=t.float32).view(1, observe_dim)
@@ -123,9 +113,9 @@ def train_td3():
 
         td3.store_episode(tmp_observations)
         # update, update more if episode is longer, else less
-        # if episode >= 50:
-        for _ in range(step):
-            td3.update()
+        if episode >= 50:
+            for _ in range(step):
+                td3.update()
 
         # show reward
         smoothed_total_reward = smoothed_total_reward * 0.9 + total_reward * 0.1
